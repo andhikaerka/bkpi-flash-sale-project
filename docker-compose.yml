@@ -45,6 +45,19 @@ services:
     depends_on:
       - backend
 
+  k6:
+    image: grafana/k6:latest
+    container_name: flash-sale-k6
+    volumes:
+      - ./k6-script.js:/scripts/k6-script.js
+    environment:
+      - API_URL=http://backend:3000/purchase
+    command: run /scripts/k6-script.js
+    depends_on:
+      - backend
+    profiles:
+      - loadtest
+
 volumes:
   postgres_data:
   redis_data:

@@ -1,4 +1,4 @@
-# ⚡ High-Throughput Flash Sale System
+# ⚡ High-Throughput Flash Sale System by Andhika Ragil Kesuma
 
 A production-grade flash sale platform built to handle thousands of concurrent purchase attempts without overselling or race conditions.
 
@@ -357,28 +357,27 @@ Stress tests simulate thousands of concurrent users hitting the purchase endpoin
 - Correct enforcement of one-purchase-per-user
 - System stability under high load
 
-### Using k6
+### Using Docker Compose (Recommended)
 
-Install [k6](https://k6.io/docs/get-started/installation/) then run:
+K6 is already integrated into the `docker-compose.yml` under the `loadtest` profile.
+
+1. Start your application services first:
+   ```bash
+   docker compose up -d
+   ```
+2. Run the load test using the provided `k6-script.js`:
+   ```bash
+   docker compose run --rm k6
+   ```
+
+_(This command spawns a temporary K6 container that executes the stress test and cleans itself up automatically when finished)._
+
+### Using k6 Locally
+
+If you prefer to run it outside of Docker and have [k6](https://k6.io/docs/get-started/installation/) installed locally, you can execute:
 
 ```bash
-# Basic load test: 200 concurrent users for 30 seconds
-k6 run --vus 200 --duration 30s - <<EOF
-import http from 'k6/http';
-import { check } from 'k6';
-
-export default function () {
-  const userId = \`user-\${Math.floor(Math.random() * 10000)}\`;
-  const res = http.post('http://localhost:3000/purchase', JSON.stringify({
-    userId,
-    productId: 'flash-sale-product-id',
-  }), { headers: { 'Content-Type': 'application/json' } });
-
-  check(res, {
-    'status is 201 or 400': (r) => r.status === 201 || r.status === 400,
-  });
-}
-EOF
+k6 run k6-script.js
 ```
 
 ### Expected Results
@@ -402,19 +401,19 @@ curl http://localhost:3000/flash-sale/status
 
 ## 🌍 Environment Variables
 
-Berikut adalah daftar variabel lingkungan (`.env`) utama yang digunakan dalam proyek ini beserta nilai _default_-nya untuk pengembangan lokal:
+Below is the list of key environment variables (`.env`) used in this project along with their default values for local development:
 
 ### Backend (`backend/.env`)
 
 | Variable       | Description                    | Default Local Value                                                      |
 | -------------- | ------------------------------ | ------------------------------------------------------------------------ |
-| `DATABASE_URL` | Koneksi ke database PostgreSQL | `postgresql://postgres:password@localhost:5432/flash_sale?schema=public` |
-| `REDIS_URL`    | Koneksi ke server Redis        | `redis://localhost:6379`                                                 |
-| `PORT`         | Port server backend            | `3000`                                                                   |
+| `DATABASE_URL` | PostgreSQL database connection | `postgresql://postgres:password@localhost:5432/flash_sale?schema=public` |
+| `REDIS_URL`    | Redis server connection        | `redis://localhost:6379`                                                 |
+| `PORT`         | Backend server port            | `3000`                                                                   |
 
 ### Frontend (`frontend/.env`)
 
-Salin file `.env.example` menjadi `.env` sebelum menjalankan frontend:
+Copy the `.env.example` file to `.env` before running the frontend:
 
 ```bash
 cp frontend/.env.example frontend/.env
@@ -422,25 +421,25 @@ cp frontend/.env.example frontend/.env
 
 | Variable       | Description                          | Default Local Value     |
 | -------------- | ------------------------------------ | ----------------------- |
-| `VITE_API_URL` | URL backend API yang akan dikonsumsi | `http://localhost:3000` |
+| `VITE_API_URL` | Backend API URL to be consumed       | `http://localhost:3000` |
 
 ---
 
 ## 🔧 Troubleshooting
 
-Berikut beberapa masalah yang mungkin terjadi saat setup lokal dan cara mengatasinya:
+Here are some common issues that might occur during local setup and how to resolve them:
 
 - **Error: `bind: address already in use`**
-  - **Penyebab:** Port `3000` (Backend), `5432` (PostgreSQL), `6379` (Redis), atau `5173` (Frontend) sudah digunakan oleh aplikasi lain di komputer Anda.
-  - **Solusi:** Matikan aplikasi yang menggunakan port tersebut, atau ubah _mapping_ port di file `docker-compose.yml` (misal: `3001:3000`).
+  - **Cause:** Port `3000` (Backend), `5432` (PostgreSQL), `6379` (Redis), or `5173` (Frontend) is already in use by another application on your computer.
+  - **Solution:** Stop the application using that port, or change the port mapping in the `docker-compose.yml` file (e.g., `3001:3000`).
 
-- **Bagaimana cara melihat _logs_ secara real-time dari Docker?**
-  - Untuk melihat _logs_ backend: `docker compose logs -f backend`
-  - Untuk melihat _logs_ frontend: `docker compose logs -f frontend`
-  - Untuk melihat _logs_ seluruh servis: `docker compose logs -f`
+- **How to view real-time logs from Docker?**
+  - To view backend logs: `docker compose logs -f backend`
+  - To view frontend logs: `docker compose logs -f frontend`
+  - To view logs for all services: `docker compose logs -f`
 
-- **Backend mengalami "Database Connection Error"**
-  - Pastikan container database sudah sepenuhnya siap. Anda bisa mencoba me-_restart_ backend dengan cara `docker compose restart backend`.
+- **Backend experiences "Database Connection Error"**
+  - Ensure the database container is fully ready. You can try restarting the backend by running `docker compose restart backend`.
 
 ---
 
