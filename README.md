@@ -1,5 +1,13 @@
 # ⚡ High-Throughput Flash Sale System by Andhika Ragil Kesuma
 
+![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)
+![Fastify](https://img.shields.io/badge/Fastify-000000?style=for-the-badge&logo=fastify&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-316192?style=for-the-badge&logo=postgresql&logoColor=white)
+![Redis](https://img.shields.io/badge/Redis-DC382D?style=for-the-badge&logo=redis&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)
+
 A production-grade flash sale platform built to handle thousands of concurrent purchase attempts without overselling or race conditions.
 
 ---
@@ -20,63 +28,65 @@ A production-grade flash sale platform built to handle thousands of concurrent p
 
 ## 🏗 System Architecture
 
-```text
-┌─────────────────────────────────────────────────────────────┐
-│                        CLIENT BROWSER                       │
-│                    React + Vite (port 5173)                 │
-└───────────────────────────┬─────────────────────────────────┘
-                            │ HTTP REST
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│                     BACKEND SERVER                          │
-│              Fastify + TypeScript (port 3000)               │
-│                                                             │
-│  ┌─────────────┐    ┌──────────────────────────────────┐    │
-│  │  Route      │    │       Purchase Flow              │    │
-│  │  Handlers   │ -> │  1. Validate input (Zod)         │    │
-│  │             │    │  2. Check sale window            │    │
-│  │  /status    │    │  3. Atomic Redis Lua Script      │    │
-│  │  /purchase  │    │     ├─ Check duplicate user      │    │
-│  │  /purchase/ │    │     ├─ Check remaining stock     │    │
-│  │   :userId   │    │     └─ Decrement stock + add user│    │
-│  └─────────────┘    │  4. BullMQ Queue → PostgreSQL    │    │
-│                     └──────────────────────────────────┘    │
-└───────────┬─────────────────────────┬───────────────────────┘
-            │                         │
-            ▼                         ▼
-┌───────────────────┐     ┌───────────────────────┐
-│      REDIS        │     │      POSTGRESQL       │
-│  (Cache & Queue)  │     │   (Source of Truth)   │
-│                   │     │                       │
-│  stock:<id>       │     │  products table       │
-│  buyers:<id>      │     │  purchases table      │
-│  BullMQ jobs      │     │  (unique constraint:  │
-│                   │     │   user_id+product_id) │
-└───────────────────┘     └───────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Client["CLIENT BROWSER"]
+        UI["React + Vite (port 5173)"]
+    end
+
+    subgraph Backend["BACKEND SERVER"]
+        API["Fastify + TypeScript (port 3000)"]
+        
+        subgraph Logic["Purchase Flow"]
+            V["1. Validate input (Zod)"]
+            W["2. Check sale window"]
+            L["3. Atomic Redis Lua Script"]
+            Q["4. BullMQ Queue"]
+            
+            V --> W --> L --> Q
+        end
+        API --> Logic
+    end
+
+    subgraph Infrastructure["INFRASTRUCTURE"]
+        Redis[("REDIS\n(Cache & Queue)")]
+        DB[("POSTGRESQL\n(Source of Truth)")]
+    end
+
+    UI -- "HTTP REST" --> API
+    L -- "Check & Update" --> Redis
+    Q -- "Async Insert (with retry)" --> DB
 ```
 
 ### Flow Diagram: Purchase Request
 
-```text
-User clicks "Buy Now"
-        │
-        ▼
-POST /purchase
-        │
-        ├── ❌ Invalid input? → 400 Bad Request
-        │
-        ├── ❌ Sale not active? → 400 Flash sale not active
-        │
-        ▼
-   Redis Lua Script (atomic)
-        │
-        ├── ❌ User already bought? → 400 Already purchased  (result = -1)
-        │
-        ├── ❌ Stock = 0? → 400 Sold out                     (result = -2)
-        │
-        └── ✅ DECR stock + SADD userId → 201 Success        (result = 1)
-                    │
-                    └─── BullMQ Job ──▶ Asynchronous DB insert (with retry)
+```mermaid
+sequenceDiagram
+    actor User
+    participant API as Fastify API
+    participant Redis as Redis (Lua Script)
+    participant BullMQ
+    participant DB as PostgreSQL
+
+    User->>API: POST /purchase
+    alt Invalid input or Sale not active
+        API-->>User: 400 Bad Request / Not active
+    else Valid Request
+        API->>Redis: Execute Lua Script (userId, productId)
+        Note over Redis: Atomic Check & Update
+        alt Already bought
+            Redis-->>API: Result = -1
+            API-->>User: 400 Already purchased
+        else Stock empty
+            Redis-->>API: Result = -2
+            API-->>User: 400 Sold out
+        else Success
+            Redis-->>API: Result = 1 (DECR stock, SADD user)
+            API-->>User: 201 Success
+            API->>BullMQ: Enqueue Job
+            BullMQ->>DB: Async Insert (with retry)
+        end
+    end
 ```
 
 ---
@@ -151,21 +161,23 @@ The frontend is architected according to Senior Engineer standards:
 ```text
 bkpi-flash-sale-project/
 ├── docker-compose.yml          # Orchestrates all services
+├── k6-script.js                # K6 Load testing script
 ├── README.md
 ├── .gitignore
 │
 ├── backend/
 │   ├── src/
+│   │   ├── __tests__/          # Modular unit testing (Vitest)
 │   │   ├── config/             # Zod Env config, Prisma client
 │   │   ├── controllers/        # Route logic & Error mapping
 │   │   ├── domain/             # Core interfaces (Repositories, Services)
 │   │   ├── infrastructure/     # BullMQ, Redis implementations
-│   │   ├── services/           # Business logic (FlashSaleService)
-│   │   └── tests/              # Modular unit testing (Vitest)
+│   │   └── services/           # Business logic (FlashSaleService)
 │
 └── frontend/
     ├── .env
     └── src/
+        ├── __tests__/          # Separated unit test files (Vitest)
         ├── components/         # Atomic UI components
         ├── hooks/              # Custom React hooks
         ├── types/              # TypeScript interfaces
