@@ -20,9 +20,9 @@ export function ProductInfo({ status }: ProductInfoProps) {
 
   return (
     <div style={{ marginBottom: '24px', textAlign: 'left' }}>
-      <h2 style={{ fontSize: '1.6rem', fontWeight: 700, marginBottom: '8px' }}>Limited Smartphone</h2>
+      <h2 style={{ fontSize: '1.6rem', fontWeight: 700, marginBottom: '8px' }}>PlayStation 5 – 30th Anniversary Edition</h2>
       <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.9rem', margin: '0 0 16px' }}>
-        Flagship processing speed, ultra-premium screen, limited availability.
+        This highly collectible console pays ultimate homage to gaming history by sporting the iconic retro grey color scheme of the original 1994 PlayStation (PS1).
       </p>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'rgba(255,255,255,0.6)', marginBottom: '6px' }}>

@@ -49,7 +49,7 @@ export function VerificationPanel() {
             type="text"
             className="input-field"
             style={{ padding: '10px 12px', fontSize: '0.85rem' }}
-            placeholder="Enter User ID to verify"
+            placeholder="Enter username or email to verify"
             value={searchUserId}
             onChange={(e) => setSearchUserId(e.target.value)}
             required

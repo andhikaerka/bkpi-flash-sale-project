@@ -216,7 +216,7 @@ describe('Non-active Sale States', () => {
 describe('Verify Order Status', () => {
   async function renderAndWaitForVerifyPanel() {
     render(<App />);
-    await waitFor(() => screen.getByPlaceholderText(/enter user id to verify/i));
+    await waitFor(() => screen.getByPlaceholderText(/enter username or email to verify/i));
   }
 
   it('shows "secured" message when user has an order', async () => {
@@ -226,11 +226,11 @@ describe('Verify Order Status', () => {
       makeFetchResponse({ userId: 'user-123', hasSecuredItem: true })
     );
 
-    fireEvent.change(screen.getByPlaceholderText(/enter user id to verify/i), {
+    fireEvent.change(screen.getByPlaceholderText(/enter username or email to verify/i), {
       target: { value: 'user-123' },
     });
     fireEvent.submit(
-      screen.getByPlaceholderText(/enter user id to verify/i).closest('form')!
+      screen.getByPlaceholderText(/enter username or email to verify/i).closest('form')!
     );
 
     await waitFor(() => {
@@ -245,11 +245,11 @@ describe('Verify Order Status', () => {
       makeFetchResponse({ userId: 'nobody', hasSecuredItem: false })
     );
 
-    fireEvent.change(screen.getByPlaceholderText(/enter user id to verify/i), {
+    fireEvent.change(screen.getByPlaceholderText(/enter username or email to verify/i), {
       target: { value: 'nobody' },
     });
     fireEvent.submit(
-      screen.getByPlaceholderText(/enter user id to verify/i).closest('form')!
+      screen.getByPlaceholderText(/enter username or email to verify/i).closest('form')!
     );
 
     await waitFor(() => {
@@ -265,11 +265,11 @@ describe('Verify Order Status', () => {
       makeFetchResponse({ userId: 'user-abc', hasSecuredItem: true })
     );
 
-    fireEvent.change(screen.getByPlaceholderText(/enter user id to verify/i), {
+    fireEvent.change(screen.getByPlaceholderText(/enter username or email to verify/i), {
       target: { value: 'user-abc' },
     });
     fireEvent.submit(
-      screen.getByPlaceholderText(/enter user id to verify/i).closest('form')!
+      screen.getByPlaceholderText(/enter username or email to verify/i).closest('form')!
     );
 
     await waitFor(() => screen.getByText(/Order confirmed for/i));
