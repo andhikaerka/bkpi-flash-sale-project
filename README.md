@@ -33,7 +33,7 @@ A production-grade flash sale platform built to handle thousands of concurrent p
 │                                                             │
 │  ┌─────────────┐    ┌──────────────────────────────────┐    │
 │  │  Route      │    │       Purchase Flow              │    │
-│  │  Handlers   │    │  1. Validate input (Zod)         │    │
+│  │  Handlers   │ -> │  1. Validate input (Zod)         │    │
 │  │             │    │  2. Check sale window            │    │
 │  │  /status    │    │  3. Atomic Redis Lua Script      │    │
 │  │  /purchase  │    │     ├─ Check duplicate user      │    │
@@ -139,6 +139,7 @@ Because this application is designed for multi-pod Kubernetes deployments, a **D
 ### 5. Frontend Atomic Architecture
 
 The frontend is architected according to Senior Engineer standards:
+
 - **Modular Components**: Views are split into small, atomic elements (`Header`, `ProductInfo`, `PurchaseForm`, etc.) following the Single Responsibility Principle.
 - **Custom Hooks**: Business logic, such as countdown timers and API polling, is decoupled from the UI using custom React hooks (`useCountdown`, `useFlashSale`).
 - **Dynamic Config**: API URLs are handled dynamically via Environment Variables (`.env`), making it deployment-ready.
@@ -401,25 +402,26 @@ curl http://localhost:3000/flash-sale/status
 
 ## 🌍 Environment Variables
 
-Berikut adalah daftar variabel lingkungan (`.env`) utama yang digunakan dalam proyek ini beserta nilai *default*-nya untuk pengembangan lokal:
+Berikut adalah daftar variabel lingkungan (`.env`) utama yang digunakan dalam proyek ini beserta nilai _default_-nya untuk pengembangan lokal:
 
 ### Backend (`backend/.env`)
 
-| Variable | Description | Default Local Value |
-| --- | --- | --- |
+| Variable       | Description                    | Default Local Value                                                      |
+| -------------- | ------------------------------ | ------------------------------------------------------------------------ |
 | `DATABASE_URL` | Koneksi ke database PostgreSQL | `postgresql://postgres:password@localhost:5432/flash_sale?schema=public` |
-| `REDIS_URL` | Koneksi ke server Redis | `redis://localhost:6379` |
-| `PORT` | Port server backend | `3000` |
+| `REDIS_URL`    | Koneksi ke server Redis        | `redis://localhost:6379`                                                 |
+| `PORT`         | Port server backend            | `3000`                                                                   |
 
 ### Frontend (`frontend/.env`)
 
 Salin file `.env.example` menjadi `.env` sebelum menjalankan frontend:
+
 ```bash
 cp frontend/.env.example frontend/.env
 ```
 
-| Variable | Description | Default Local Value |
-| --- | --- | --- |
+| Variable       | Description                          | Default Local Value     |
+| -------------- | ------------------------------------ | ----------------------- |
 | `VITE_API_URL` | URL backend API yang akan dikonsumsi | `http://localhost:3000` |
 
 ---
@@ -430,27 +432,27 @@ Berikut beberapa masalah yang mungkin terjadi saat setup lokal dan cara mengatas
 
 - **Error: `bind: address already in use`**
   - **Penyebab:** Port `3000` (Backend), `5432` (PostgreSQL), `6379` (Redis), atau `5173` (Frontend) sudah digunakan oleh aplikasi lain di komputer Anda.
-  - **Solusi:** Matikan aplikasi yang menggunakan port tersebut, atau ubah *mapping* port di file `docker-compose.yml` (misal: `3001:3000`).
+  - **Solusi:** Matikan aplikasi yang menggunakan port tersebut, atau ubah _mapping_ port di file `docker-compose.yml` (misal: `3001:3000`).
 
-- **Bagaimana cara melihat *logs* secara real-time dari Docker?**
-  - Untuk melihat *logs* backend: `docker compose logs -f backend`
-  - Untuk melihat *logs* frontend: `docker compose logs -f frontend`
-  - Untuk melihat *logs* seluruh servis: `docker compose logs -f`
+- **Bagaimana cara melihat _logs_ secara real-time dari Docker?**
+  - Untuk melihat _logs_ backend: `docker compose logs -f backend`
+  - Untuk melihat _logs_ frontend: `docker compose logs -f frontend`
+  - Untuk melihat _logs_ seluruh servis: `docker compose logs -f`
 
 - **Backend mengalami "Database Connection Error"**
-  - Pastikan container database sudah sepenuhnya siap. Anda bisa mencoba me-*restart* backend dengan cara `docker compose restart backend`.
+  - Pastikan container database sudah sepenuhnya siap. Anda bisa mencoba me-_restart_ backend dengan cara `docker compose restart backend`.
 
 ---
 
 ## 🔮 Future Improvements
 
-| Improvement                                    | Benefit                               |
-| ---------------------------------------------- | ------------------------------------- |
-| Redis Sentinel / Cluster                       | High availability for Redis           |
-| Horizontal scaling (multiple backend replicas) | Higher throughput                     |
-| Rate limiting per IP                           | Prevent bot abuse                     |
-| WebSocket / SSE for stock updates              | Real-time UI without polling          |
-| Prometheus + Grafana metrics                   | Observability under load              |
+| Improvement                                    | Benefit                      |
+| ---------------------------------------------- | ---------------------------- |
+| Redis Sentinel / Cluster                       | High availability for Redis  |
+| Horizontal scaling (multiple backend replicas) | Higher throughput            |
+| Rate limiting per IP                           | Prevent bot abuse            |
+| WebSocket / SSE for stock updates              | Real-time UI without polling |
+| Prometheus + Grafana metrics                   | Observability under load     |
 
 ---
 
