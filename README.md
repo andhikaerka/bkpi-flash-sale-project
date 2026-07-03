@@ -4,6 +4,7 @@
 ![Fastify](https://img.shields.io/badge/Fastify-000000?style=for-the-badge&logo=fastify&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-316192?style=for-the-badge&logo=postgresql&logoColor=white)
 ![Redis](https://img.shields.io/badge/Redis-DC382D?style=for-the-badge&logo=redis&logoColor=white)
+![BullMQ](https://img.shields.io/badge/BullMQ-FF6B35?style=for-the-badge&logo=redis&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)
@@ -105,6 +106,7 @@ sequenceDiagram
 | **Logging**            | Pino                    | Structured, high-performance JSON logging           |
 | **Testing**            | Vitest                  | Fast unit/integration testing                       |
 | **Containerization**   | Docker + Docker Compose | Reproducible local environment                      |
+| **Health Checks**      | Docker Healthcheck      | Sequential startup guarantees — no race conditions  |
 
 ---
 
@@ -156,25 +158,43 @@ The frontend is architected according to Senior Engineer standards:
 
 ---
 
+### 6. PostgreSQL as the Durable Source of Truth
+
+While Redis handles all hot-path operations with sub-millisecond latency, **PostgreSQL serves as the authoritative, permanent record** of every successful purchase.
+
+**Why PostgreSQL specifically?**
+
+- **ACID Guarantees**: Every purchase record written to PostgreSQL is fully atomic, consistent, isolated, and durable. Even in the event of a server crash mid-write, the database will never be left in a corrupted or partial state.
+- **System of Record**: Redis is an in-memory store — its data is ephemeral and can be lost or invalidated (e.g., on restart or eviction). PostgreSQL persists data to disk, making it the single source of truth for audit trails, reconciliation, and system recovery.
+- **Self-Healing on Boot**: When the server restarts, it reads from PostgreSQL to reconstruct the Redis state (`buyers` SET and stock counter). This is only possible because PostgreSQL reliably holds the complete, correct purchase history.
+- **Complementary Architecture**: Redis handles *speed* (concurrency, atomic ops), PostgreSQL handles *durability* (persistence, integrity). Neither replaces the other — together they form a write-behind cache pattern that is both fast and safe.
+- **Type-Safe Access via Prisma**: Prisma ORM provides auto-generated, TypeScript-typed database clients from the schema, eliminating an entire class of runtime errors caused by mismatched types or raw SQL mistakes.
+
+---
+
 ## 📁 Project Structure
 
 ```text
 bkpi-flash-sale-project/
-├── docker-compose.yml          # Orchestrates all services
+├── docker-compose.yml          # Orchestrates all services (with healthchecks)
 ├── k6-script.js                # K6 Load testing script
 ├── README.md
 ├── .gitignore
 │
 ├── backend/
+│   ├── .dockerignore           # Excludes node_modules from Docker build context
+│   ├── Dockerfile
 │   ├── src/
 │   │   ├── __tests__/          # Modular unit testing (Vitest)
 │   │   ├── config/             # Zod Env config, Prisma client
 │   │   ├── controllers/        # Route logic & Error mapping
 │   │   ├── domain/             # Core interfaces (Repositories, Services)
 │   │   ├── infrastructure/     # BullMQ, Redis implementations
+│   │   ├── routes/             # flashSaleRoutes (incl. GET /health)
 │   │   └── services/           # Business logic (FlashSaleService)
 │
 └── frontend/
+    ├── .dockerignore           # Excludes node_modules from Docker build context
     ├── .env
     └── src/
         ├── __tests__/          # Separated unit test files (Vitest)
@@ -202,9 +222,13 @@ This starts **all services** (PostgreSQL, Redis, Backend, Frontend) in one comma
 git clone <your-repo-url>
 cd bkpi-flash-sale-project
 
-# Start all services
-docker compose up --build
+# Start all services in detached mode
+docker compose up -d --build
 ```
+
+> **Note:** Services start in a guaranteed sequential order enforced by Docker healthchecks:
+> `PostgreSQL` → `Redis` → `Backend` → `Frontend`
+> The frontend will only be accessible once the backend is fully ready.
 
 | Service     | URL                   |
 | ----------- | --------------------- |
@@ -334,6 +358,20 @@ Attempts to purchase the flash sale item.
 
 ---
 
+### `GET /health`
+
+Returns the health status of the backend server. Used internally by Docker Compose healthchecks to determine when the backend is ready to accept requests.
+
+**Response `200`:**
+
+```json
+{
+  "status": "ok"
+}
+```
+
+---
+
 ### `GET /purchase/:userId`
 
 Checks if a specific user successfully secured an item.
@@ -440,6 +478,16 @@ cp frontend/.env.example frontend/.env
 ## 🔧 Troubleshooting
 
 Here are some common issues that might occur during local setup and how to resolve them:
+
+- **`http://localhost:5173` shows "This page isn't working" right after startup**
+  - **Cause:** Previously, `depends_on` in Docker Compose only waited for the container to *start*, not for the service inside it to be *ready*. This caused a race condition where the frontend started before the backend finished initializing.
+  - **Fix (already applied):** Docker healthchecks are now configured on all services. The startup order is strictly enforced:
+    `PostgreSQL (healthy)` → `Redis (healthy)` → `Backend (healthy via GET /health)` → `Frontend (starts)`
+  - If you still see this on a fresh clone, ensure you are using the latest `docker-compose.yml`.
+
+- **Build fails with `invalid file request node_modules/.bin/acorn`**
+  - **Cause:** Missing `.dockerignore` file causes Docker to attempt transferring Windows `node_modules` (including broken symlinks in `.bin/`) into the Linux build context.
+  - **Fix (already applied):** `.dockerignore` files are included in both `backend/` and `frontend/` to exclude `node_modules` from the Docker build context. `npm install` runs inside the container on a clean Linux environment.
 
 - **Error: `bind: address already in use`**
   - **Cause:** Port `3000` (Backend), `5432` (PostgreSQL), `6379` (Redis), or `5173` (Frontend) is already in use by another application on your computer.
