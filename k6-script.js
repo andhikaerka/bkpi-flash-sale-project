@@ -10,7 +10,28 @@ export const options = {
   ],
 };
 
-export default function () {
+// Setup dijalankan 1 kali sebelum VUs mulai menyerang
+export function setup() {
+  const purchaseUrl = __ENV.API_URL || 'http://localhost:3000/purchase';
+  // Dapatkan base URL (misal: http://localhost:3000)
+  const baseUrl = purchaseUrl.replace('/purchase', '');
+  
+  // Ambil status flash sale untuk mendapatkan productId yang asli dari database
+  const res = http.get(`${baseUrl}/flash-sale/status`);
+  let productId = 'flash-sale-product-id'; // Fallback
+  
+  if (res.status === 200) {
+    const body = res.json();
+    if (body && body.productId) {
+      productId = body.productId;
+    }
+  }
+  
+  // Data ini akan diteruskan ke fungsi default (setiap VU)
+  return { productId: productId };
+}
+
+export default function (data) {
   // Endpoint backend yang akan ditembak (bisa di-override lewat environment variable)
   const url = __ENV.API_URL || 'http://localhost:3000/purchase';
   
@@ -19,7 +40,7 @@ export default function () {
   
   const payload = JSON.stringify({
     userId: randomUserId,
-    productId: 'flash-sale-product-id' // ID produk default aplikasi Anda
+    productId: data.productId // Menggunakan ID asli dari server
   });
 
   const params = {
