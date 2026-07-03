@@ -7,6 +7,7 @@ export function useFlashSale() {
   const [status, setStatus] = useState<SaleStatusResponse | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
   const [statusError, setStatusError] = useState(false);
+  const [, setRetryCount] = useState(0);
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -15,11 +16,19 @@ export function useFlashSale() {
       const data: SaleStatusResponse = await res.json();
       setStatus(data);
       setStatusError(false);
+      setStatusLoading(false);
+      setRetryCount(0); // Reset retry count on success
     } catch (err) {
       console.error('Error fetching sale status:', err);
-      setStatusError(true);
-    } finally {
-      setStatusLoading(false);
+      setRetryCount(prev => {
+        const nextCount = prev + 1;
+        // If we have failed 5 times (about 10 seconds), then show the error
+        if (nextCount >= 5) {
+          setStatusError(true);
+          setStatusLoading(false);
+        }
+        return nextCount;
+      });
     }
   }, []);
 
