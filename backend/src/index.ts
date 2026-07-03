@@ -27,7 +27,7 @@ const start = async () => {
   try {
     // --- Infrastructure Layer ---
     const prismaClient = new PrismaClient();
-    const redisClient = new Redis(env.REDIS_URL);
+    const redisClient = new Redis(env.REDIS_URL, { maxRetriesPerRequest: null });
 
     // --- Repository & Queue Layer ---
     const productRepo = new PrismaProductRepository(prismaClient);

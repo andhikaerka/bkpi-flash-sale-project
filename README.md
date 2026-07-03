@@ -20,7 +20,7 @@ A production-grade flash sale platform built to handle thousands of concurrent p
 
 ## 🏗 System Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │                        CLIENT BROWSER                       │
 │                    React + Vite (port 5173)                 │
@@ -39,26 +39,25 @@ A production-grade flash sale platform built to handle thousands of concurrent p
 │  │  /purchase  │    │     ├─ Check duplicate user      │    │
 │  │  /purchase/ │    │     ├─ Check remaining stock     │    │
 │  │   :userId   │    │     └─ Decrement stock + add user│    │
-│  └─────────────┘    │  4. Fire-and-forget → PostgreSQL │    │
+│  └─────────────┘    │  4. BullMQ Queue → PostgreSQL    │    │
 │                     └──────────────────────────────────┘    │
 └───────────┬─────────────────────────┬───────────────────────┘
             │                         │
             ▼                         ▼
 ┌───────────────────┐     ┌───────────────────────┐
 │      REDIS        │     │      POSTGRESQL       │
-│  (Cache & Atomic) │     │   (Source of Truth)   │
+│  (Cache & Queue)  │     │   (Source of Truth)   │
 │                   │     │                       │
-│  stock:<id>  →    │     │  products table       │
-│    integer count  │     │  purchases table      │
-│                   │     │  (unique constraint:  │
-│  buyers:<id> →    │     │   user_id+product_id) │
-│    SET of userIds │     │                       │
+│  stock:<id>       │     │  products table       │
+│  buyers:<id>      │     │  purchases table      │
+│  BullMQ jobs      │     │  (unique constraint:  │
+│                   │     │   user_id+product_id) │
 └───────────────────┘     └───────────────────────┘
 ```
 
 ### Flow Diagram: Purchase Request
 
-```
+```text
 User clicks "Buy Now"
         │
         ▼
@@ -77,8 +76,7 @@ POST /purchase
         │
         └── ✅ DECR stock + SADD userId → 201 Success        (result = 1)
                     │
-                    └─── Fire & Forget ──▶ PostgreSQL upsert
-                         (non-blocking)
+                    └─── BullMQ Job ──▶ Asynchronous DB insert (with retry)
 ```
 
 ---
@@ -88,14 +86,14 @@ POST /purchase
 | Layer                  | Technology              | Reason                                              |
 | ---------------------- | ----------------------- | --------------------------------------------------- |
 | **Backend**            | Fastify + TypeScript    | High-performance HTTP server, low overhead          |
-| **Frontend**           | React + Vite            | Fast dev experience, component-based UI             |
+| **Frontend**           | React + Vite            | Fast dev experience, modular UI components          |
 | **Database**           | PostgreSQL              | Durable source of truth with ACID guarantees        |
 | **Cache / Atomic Ops** | Redis                   | Sub-millisecond latency for hot-path operations     |
+| **Message Queue**      | BullMQ                  | Resilient background jobs and retry mechanisms      |
 | **ORM**                | Prisma                  | Type-safe DB access, easy migrations                |
 | **Validation**         | Zod                     | Runtime schema validation with TypeScript inference |
 | **Logging**            | Pino                    | Structured, high-performance JSON logging           |
 | **Testing**            | Vitest                  | Fast unit/integration testing                       |
-| **Stress Testing**     | k6                      | Scriptable load testing tool                        |
 | **Containerization**   | Docker + Docker Compose | Reproducible local environment                      |
 
 ---
@@ -112,69 +110,65 @@ The core purchase logic runs inside a single **Redis Lua Script** that atomicall
 
 **Why?** Redis guarantees that Lua scripts execute atomically — no two scripts can interleave. This completely eliminates race conditions and overselling without needing distributed locks.
 
-**Trade-off:** Redis data is in-memory and can be lost on crash. Mitigated by the self-healing mechanism on startup (see below).
+---
+
+### 2. BullMQ for Durable PostgreSQL Writes
+
+After a successful Redis operation, the purchase is written to PostgreSQL asynchronously via **BullMQ**. The API responds with `201 Success` immediately.
+
+**Why?** Writing directly to PostgreSQL poses a risk of data loss if the database briefly goes down or the server crashes before completing the write. BullMQ ensures that if a database write fails, it will be automatically retried with exponential backoff until successful.
 
 ---
 
-### 2. Fire-and-Forget PostgreSQL Write
+### 3. Distributed Lock for Self-Healing
 
-After a successful Redis operation, the purchase is written to PostgreSQL **asynchronously** (fire-and-forget). The API responds with `201 Success` immediately without waiting for the DB write.
+When the server boots, it reads all existing purchases from PostgreSQL and syncs them to Redis.
+Because this application is designed for multi-pod Kubernetes deployments, a **Distributed Lock (`SETNX`)** is utilized during startup.
 
-**Why?** This keeps API latency extremely low under high load. The Redis SET is the authority for "who bought what" during the sale.
-
-**Trade-off:** In theory, a DB write could fail silently. Mitigated by:
-
-- Error logging on failure
-- The DB has a `UNIQUE(user_id, product_id)` constraint as a safety net
-- Self-healing on restart syncs DB state back to Redis
+**Why?** If multiple pods start simultaneously, only the pod that acquires the lock will perform the DB-to-Redis synchronization, preventing race conditions and corrupted states.
 
 ---
 
-### 3. Self-Healing State on Startup
+### 4. Fail-Fast Environment Validation & Graceful Shutdown
 
-When the server boots, it reads all existing purchases from PostgreSQL and re-populates:
-
-- `stock:<productId>` in Redis (calculated as `INITIAL_STOCK - purchase_count`)
-- `buyers:<productId>` SET in Redis (all existing buyer user IDs)
-
-**Why?** If Redis is restarted and loses data, the system recovers its state from the database, ensuring correctness without manual intervention.
+- **Fail-Fast**: Upon boot, all environment variables are validated using Zod. If configurations are missing or incorrect, the server crashes immediately with a clear error, preventing obscure runtime bugs.
+- **Graceful Shutdown**: The server actively listens for `SIGINT` and `SIGTERM`. Upon termination, it stops accepting new requests, finishes in-flight operations, and gracefully closes Prisma, BullMQ, and Redis connections.
 
 ---
 
-### 4. No Message Queue in the Critical Path
+### 5. Frontend Atomic Architecture
 
-A message queue (e.g., BullMQ, RabbitMQ) was **intentionally excluded** from the purchase flow.
-
-**Why?** The core requirements — preventing overselling and enforcing one-purchase-per-user — are fully satisfied by Redis atomic operations. Adding a queue would introduce operational complexity without meaningful benefit for the current scope.
-
-**When to add it:** If the system grows to require email notifications, audit logging, analytics, or third-party integrations, BullMQ would be the right addition for those async workloads.
+The frontend is architected according to Senior Engineer standards:
+- **Modular Components**: Views are split into small, atomic elements (`Header`, `ProductInfo`, `PurchaseForm`, etc.) following the Single Responsibility Principle.
+- **Custom Hooks**: Business logic, such as countdown timers and API polling, is decoupled from the UI using custom React hooks (`useCountdown`, `useFlashSale`).
+- **Dynamic Config**: API URLs are handled dynamically via Environment Variables (`.env`), making it deployment-ready.
 
 ---
 
 ## 📁 Project Structure
 
-```
+```text
 bkpi-flash-sale-project/
 ├── docker-compose.yml          # Orchestrates all services
 ├── README.md
 ├── .gitignore
 │
 ├── backend/
-│   ├── Dockerfile
-│   ├── package.json
-│   ├── tsconfig.json
-│   ├── prisma/
-│   │   └── schema.prisma       # DB models: Product, Purchase
-│   └── src/
-│       └── index.ts            # Fastify server, routes, Redis logic
+│   ├── src/
+│   │   ├── config/             # Zod Env config, Prisma client
+│   │   ├── controllers/        # Route logic & Error mapping
+│   │   ├── domain/             # Core interfaces (Repositories, Services)
+│   │   ├── infrastructure/     # BullMQ, Redis implementations
+│   │   ├── services/           # Business logic (FlashSaleService)
+│   │   └── tests/              # Modular unit testing (Vitest)
 │
 └── frontend/
-    ├── Dockerfile
-    ├── package.json
-    ├── vite.config.ts
-    ├── index.html
+    ├── .env
     └── src/
-        └── App.tsx             # React UI: status, buy, verify
+        ├── components/         # Atomic UI components
+        ├── hooks/              # Custom React hooks
+        ├── types/              # TypeScript interfaces
+        └── App.tsx             # Root Layout
 ```
 
 ---
@@ -246,6 +240,9 @@ npm run dev
 ```bash
 cd frontend
 npm install
+
+# Setup environment variables
+cp .env.example .env
 
 # Start development server
 npm run dev
@@ -342,8 +339,9 @@ Checks if a specific user successfully secured an item.
 ## 🧪 Running Tests
 
 ```bash
-cd backend
-npm test
+# Run tests inside Docker
+docker compose run --rm backend npm test
+docker compose run --rm frontend npm test
 ```
 
 Tests use **Vitest** and Fastify's built-in injection utility to test routes without starting a real HTTP server.
@@ -401,11 +399,53 @@ curl http://localhost:3000/flash-sale/status
 
 ---
 
+## 🌍 Environment Variables
+
+Berikut adalah daftar variabel lingkungan (`.env`) utama yang digunakan dalam proyek ini beserta nilai *default*-nya untuk pengembangan lokal:
+
+### Backend (`backend/.env`)
+
+| Variable | Description | Default Local Value |
+| --- | --- | --- |
+| `DATABASE_URL` | Koneksi ke database PostgreSQL | `postgresql://postgres:password@localhost:5432/flash_sale?schema=public` |
+| `REDIS_URL` | Koneksi ke server Redis | `redis://localhost:6379` |
+| `PORT` | Port server backend | `3000` |
+
+### Frontend (`frontend/.env`)
+
+Salin file `.env.example` menjadi `.env` sebelum menjalankan frontend:
+```bash
+cp frontend/.env.example frontend/.env
+```
+
+| Variable | Description | Default Local Value |
+| --- | --- | --- |
+| `VITE_API_URL` | URL backend API yang akan dikonsumsi | `http://localhost:3000` |
+
+---
+
+## 🔧 Troubleshooting
+
+Berikut beberapa masalah yang mungkin terjadi saat setup lokal dan cara mengatasinya:
+
+- **Error: `bind: address already in use`**
+  - **Penyebab:** Port `3000` (Backend), `5432` (PostgreSQL), `6379` (Redis), atau `5173` (Frontend) sudah digunakan oleh aplikasi lain di komputer Anda.
+  - **Solusi:** Matikan aplikasi yang menggunakan port tersebut, atau ubah *mapping* port di file `docker-compose.yml` (misal: `3001:3000`).
+
+- **Bagaimana cara melihat *logs* secara real-time dari Docker?**
+  - Untuk melihat *logs* backend: `docker compose logs -f backend`
+  - Untuk melihat *logs* frontend: `docker compose logs -f frontend`
+  - Untuk melihat *logs* seluruh servis: `docker compose logs -f`
+
+- **Backend mengalami "Database Connection Error"**
+  - Pastikan container database sudah sepenuhnya siap. Anda bisa mencoba me-*restart* backend dengan cara `docker compose restart backend`.
+
+---
+
 ## 🔮 Future Improvements
 
 | Improvement                                    | Benefit                               |
 | ---------------------------------------------- | ------------------------------------- |
-| BullMQ job queue                               | Async email notifications, audit logs |
 | Redis Sentinel / Cluster                       | High availability for Redis           |
 | Horizontal scaling (multiple backend replicas) | Higher throughput                     |
 | Rate limiting per IP                           | Prevent bot abuse                     |

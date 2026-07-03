@@ -110,3 +110,4 @@ redis_data/
 .cache/
 .temp/
 .tmp/
+readme_task.md
