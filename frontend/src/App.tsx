@@ -8,7 +8,8 @@ import {
   Package, 
   Search, 
   ShieldCheck, 
-  AlertTriangle 
+  AlertTriangle,
+  Settings
 } from 'lucide-react';
 
 const API_BASE = 'http://localhost:3000';
@@ -34,6 +35,50 @@ export default function App() {
   // Status check states
   const [searchUserId, setSearchUserId] = useState('');
   const [checkResult, setCheckResult] = useState<'not-checked' | 'secured' | 'not-secured' | 'checking'>('not-checked');
+
+  // Admin states
+  const [showAdmin, setShowAdmin] = useState(false);
+  const [adminStartTime, setAdminStartTime] = useState('');
+  const [adminEndTime, setAdminEndTime] = useState('');
+  const [adminSaving, setAdminSaving] = useState(false);
+  const [adminMessage, setAdminMessage] = useState({ type: '', text: '' });
+
+  // Countdown Timer state
+  const [timeLeft, setTimeLeft] = useState<{ hours: number; minutes: number; seconds: number } | null>(null);
+
+  useEffect(() => {
+    if (!status) return;
+
+    let targetTime = 0;
+    if (status.status === 'upcoming') {
+      targetTime = new Date(status.startTime).getTime();
+    } else if (status.status === 'active') {
+      targetTime = new Date(status.endTime).getTime();
+    }
+
+    if (!targetTime) {
+      setTimeLeft(null);
+      return;
+    }
+
+    const updateTime = () => {
+      const now = new Date().getTime();
+      const distance = targetTime - now;
+
+      if (distance <= 0) {
+        setTimeLeft({ hours: 0, minutes: 0, seconds: 0 });
+      } else {
+        const hours = Math.floor(distance / (1000 * 60 * 60));
+        const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+        const seconds = Math.floor((distance % (1000 * 60)) / 1000);
+        setTimeLeft({ hours, minutes, seconds });
+      }
+    };
+    
+    updateTime();
+    const interval = setInterval(updateTime, 1000);
+    return () => clearInterval(interval);
+  }, [status]);
 
   // Auto-dismiss verify alert after 3 seconds
   useEffect(() => {
@@ -120,6 +165,47 @@ export default function App() {
     } catch (err) {
       setCheckResult('not-checked');
       alert('Could not verify status. Make sure the backend server is running.');
+    }
+  };
+
+  const handleAdminToggle = () => {
+    if (!showAdmin && status) {
+      const start = new Date(status.startTime);
+      const end = new Date(status.endTime);
+      start.setMinutes(start.getMinutes() - start.getTimezoneOffset());
+      end.setMinutes(end.getMinutes() - end.getTimezoneOffset());
+      setAdminStartTime(start.toISOString().slice(0, 16));
+      setAdminEndTime(end.toISOString().slice(0, 16));
+      setAdminMessage({ type: '', text: '' });
+    }
+    setShowAdmin(!showAdmin);
+  };
+
+  const handleAdminSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminSaving(true);
+    setAdminMessage({ type: '', text: '' });
+
+    try {
+      const res = await fetch(`${API_BASE}/flash-sale/config`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          startTime: new Date(adminStartTime).toISOString(),
+          endTime: new Date(adminEndTime).toISOString()
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setAdminMessage({ type: 'success', text: 'Configuration saved!' });
+        setStatus(prev => prev ? { ...prev, startTime: data.startTime, endTime: data.endTime } : null);
+      } else {
+        setAdminMessage({ type: 'error', text: data.error || 'Failed to save' });
+      }
+    } catch (err) {
+      setAdminMessage({ type: 'error', text: 'Connection error' });
+    } finally {
+      setAdminSaving(false);
     }
   };
 
@@ -278,14 +364,22 @@ export default function App() {
           </div>
 
           {/* Timing details */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(255,255,255,0.02)', padding: '12px 16px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.04)', fontSize: '0.85rem', color: 'rgba(255,255,255,0.7)' }}>
-            <Timer size={16} style={{ color: '#06b6d4' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', background: 'rgba(255,255,255,0.02)', padding: '12px 16px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.04)', fontSize: '0.85rem', color: 'rgba(255,255,255,0.7)' }}>
+            <Timer size={20} style={{ color: '#06b6d4' }} />
             <div>
               {status.status === 'upcoming' && (
-                <span>Starts at <strong style={{ color: '#ffffff' }}>{formatDate(startTime)}</strong></span>
+                timeLeft ? (
+                  <span>Starts in <strong style={{ color: '#ffffff', fontFamily: 'monospace', fontSize: '1.05rem', letterSpacing: '1px' }}>{String(timeLeft.hours).padStart(2, '0')}:{String(timeLeft.minutes).padStart(2, '0')}:{String(timeLeft.seconds).padStart(2, '0')}</strong></span>
+                ) : (
+                  <span>Starts at <strong style={{ color: '#ffffff' }}>{formatDate(startTime)}</strong></span>
+                )
               )}
               {status.status === 'active' && (
-                <span>Ends at <strong style={{ color: '#ffffff' }}>{formatDate(endTime)}</strong></span>
+                timeLeft ? (
+                  <span>Ends in <strong style={{ color: '#facc15', fontFamily: 'monospace', fontSize: '1.05rem', letterSpacing: '1px' }}>{String(timeLeft.hours).padStart(2, '0')}:{String(timeLeft.minutes).padStart(2, '0')}:{String(timeLeft.seconds).padStart(2, '0')}</strong></span>
+                ) : (
+                  <span>Ends at <strong style={{ color: '#ffffff' }}>{formatDate(endTime)}</strong></span>
+                )
               )}
               {status.status === 'ended' && (
                 <span>Sale concluded at <strong style={{ color: '#ffffff' }}>{formatDate(endTime)}</strong></span>
@@ -390,6 +484,70 @@ export default function App() {
           </div>
         )}
       </div>
+
+      {/* Admin Panel Toggle */}
+      <div style={{ textAlign: 'center' }}>
+        <button 
+          onClick={handleAdminToggle}
+          style={{ 
+            background: '#eab308', 
+            color: '#111827', 
+            border: 'none', 
+            borderRadius: '8px', 
+            padding: '8px 16px', 
+            cursor: 'pointer', 
+            display: 'inline-flex', 
+            alignItems: 'center', 
+            gap: '6px', 
+            fontSize: '0.9rem',
+            fontWeight: 600,
+            boxShadow: '0 4px 12px rgba(234, 179, 8, 0.3)',
+            transition: 'all 0.2s ease'
+          }}
+        >
+          <Settings size={16} /> {showAdmin ? 'Close Admin Panel' : 'Admin Panel'}
+        </button>
+      </div>
+
+      {/* Admin Panel */}
+      {showAdmin && (
+        <div className="glass-panel" style={{ padding: '24px 30px' }}>
+          <h3 style={{ fontSize: '1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
+            <Settings size={18} style={{ color: '#f43f5e' }} />
+            Configure Flash Sale
+          </h3>
+          {adminMessage.text && (
+            <p style={{ marginBottom: '16px', fontSize: '0.85rem', color: adminMessage.type === 'success' ? '#34d399' : '#f87171' }}>
+              {adminMessage.text}
+            </p>
+          )}
+          <form onSubmit={handleAdminSave} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div className="input-group">
+              <label className="input-label" style={{ display: 'block', marginBottom: '6px' }}>Start Time</label>
+              <input
+                type="datetime-local"
+                className="input-field"
+                value={adminStartTime}
+                onChange={(e) => setAdminStartTime(e.target.value)}
+                required
+              />
+            </div>
+            <div className="input-group">
+              <label className="input-label" style={{ display: 'block', marginBottom: '6px' }}>End Time</label>
+              <input
+                type="datetime-local"
+                className="input-field"
+                value={adminEndTime}
+                onChange={(e) => setAdminEndTime(e.target.value)}
+                required
+              />
+            </div>
+            <button type="submit" className="btn-primary" disabled={adminSaving} style={{ background: '#f43f5e' }}>
+              {adminSaving ? 'Saving...' : 'Save Configuration'}
+            </button>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

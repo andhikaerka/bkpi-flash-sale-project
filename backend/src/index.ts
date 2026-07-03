@@ -20,9 +20,9 @@ const prisma = new PrismaClient();
 const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
 
 // --- DUMMY CONFIG UNTUK FLASH SALE ---
-const PRODUCT_ID = "flash-sale-product-id";
-const FLASH_SALE_START = new Date(Date.now() - 1000 * 60 * 10); // Sudah mulai 10 menit lalu
-const FLASH_SALE_END = new Date(Date.now() + 1000 * 60 * 60);   // Selesai 1 jam lagi
+const PRODUCT_ID = "800af4ee-25d5-4317-8e88-27a07c8fcfe7";
+let FLASH_SALE_START = new Date(Date.now() - 1000 * 60 * 10); // Default, akan dioverride oleh database
+let FLASH_SALE_END = new Date(Date.now() + 1000 * 60 * 60);   // Default, akan dioverride oleh database
 const INITIAL_STOCK = 100;
 
 // --- REDIS LUA SCRIPT FOR ATOMIC OPERATIONS ---
@@ -138,9 +138,56 @@ fastify.get('/purchase/:userId', async (request, reply) => {
   };
 });
 
+// 4. Endpoint: Configurable Flash Sale Period
+const configSchema = z.object({
+  startTime: z.string().datetime(),
+  endTime: z.string().datetime(),
+});
+
+fastify.patch('/flash-sale/config', async (request, reply) => {
+  const parseResult = configSchema.safeParse(request.body);
+  if (!parseResult.success) {
+    return reply.status(400).send({ error: "Invalid input fields", details: parseResult.error.format() });
+  }
+
+  const { startTime, endTime } = parseResult.data;
+  const newStart = new Date(startTime);
+  const newEnd = new Date(endTime);
+
+  if (newStart >= newEnd) {
+    return reply.status(400).send({ error: "Start time must be before end time" });
+  }
+
+  // Update in DB
+  try {
+    await prisma.product.update({
+      where: { id: PRODUCT_ID },
+      data: { start_time: newStart, end_time: newEnd }
+    });
+  } catch (err) {
+    return reply.status(500).send({ error: "Failed to update database" });
+  }
+
+  // Update in memory
+  FLASH_SALE_START = newStart;
+  FLASH_SALE_END = newEnd;
+
+  return reply.status(200).send({ message: "Flash sale period updated successfully", startTime, endTime });
+});
+
 // --- SEEDING & START SERVER ---
 const start = async () => {
   try {
+    // Coba ambil config dari DB terlebih dahulu
+    const existingProduct = await prisma.product.findUnique({
+      where: { id: PRODUCT_ID }
+    });
+
+    if (existingProduct) {
+      FLASH_SALE_START = existingProduct.start_time;
+      FLASH_SALE_END = existingProduct.end_time;
+    }
+
     // Sinkronisasi stok & pembeli ke Redis dari database (Self-Healing / State Recovery)
     const existingPurchases = await prisma.purchase.findMany({
       where: { product_id: PRODUCT_ID },

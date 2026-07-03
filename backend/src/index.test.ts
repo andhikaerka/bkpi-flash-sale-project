@@ -11,6 +11,8 @@ vi.mock('@prisma/client', () => {
     },
     product: {
       upsert: vi.fn().mockResolvedValue({}),
+      update: vi.fn().mockResolvedValue({}),
+      findUnique: vi.fn().mockResolvedValue(null),
     },
   };
   return { PrismaClient: vi.fn(() => mockPrisma) };
@@ -40,8 +42,8 @@ async function buildApp() {
   const redis = new Redis() as any;
 
   const PRODUCT_ID = 'flash-sale-product-id';
-  const FLASH_SALE_START = new Date(Date.now() - 1000 * 60 * 10); // active: 10 min ago
-  const FLASH_SALE_END = new Date(Date.now() + 1000 * 60 * 60);   // ends in 1 hour
+  let FLASH_SALE_START = new Date(Date.now() - 1000 * 60 * 10); // active: 10 min ago
+  let FLASH_SALE_END = new Date(Date.now() + 1000 * 60 * 60);   // ends in 1 hour
   const INITIAL_STOCK = 100;
 
   const fastify = Fastify({ logger: false });
@@ -95,6 +97,41 @@ async function buildApp() {
     prisma.purchase.create({ data: { user_id: userId, product_id: productId } }).catch(() => {});
 
     return reply.status(201).send({ message: 'Purchase successful! Your item is secured.' });
+  });
+
+  // PATCH /flash-sale/config
+  const configSchema = z.object({
+    startTime: z.string().datetime(),
+    endTime: z.string().datetime(),
+  });
+
+  fastify.patch('/flash-sale/config', async (request, reply) => {
+    const parseResult = configSchema.safeParse(request.body);
+    if (!parseResult.success) {
+      return reply.status(400).send({ error: 'Invalid input fields' });
+    }
+
+    const { startTime, endTime } = parseResult.data;
+    const newStart = new Date(startTime);
+    const newEnd = new Date(endTime);
+
+    if (newStart >= newEnd) {
+      return reply.status(400).send({ error: 'Start time must be before end time' });
+    }
+
+    try {
+      await prisma.product.update({
+        where: { id: PRODUCT_ID },
+        data: { start_time: newStart, end_time: newEnd }
+      });
+    } catch (err) {
+      return reply.status(500).send({ error: 'Failed to update database' });
+    }
+
+    FLASH_SALE_START = newStart;
+    FLASH_SALE_END = newEnd;
+
+    return reply.status(200).send({ message: 'Flash sale period updated successfully', startTime, endTime });
   });
 
   // GET /purchase/:userId
@@ -245,6 +282,46 @@ describe('GET /purchase/:userId', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ userId: 'user-unknown', hasSecuredItem: false });
+
+    await app.close();
+  });
+});
+
+describe('PATCH /flash-sale/config', () => {
+  it('updates flash sale period successfully', async () => {
+    const app = await buildApp();
+    const newStart = new Date(Date.now() + 1000 * 60 * 60).toISOString(); // starts in 1 hour
+    const newEnd = new Date(Date.now() + 1000 * 60 * 120).toISOString();  // ends in 2 hours
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/flash-sale/config',
+      payload: { startTime: newStart, endTime: newEnd },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().message).toBe('Flash sale period updated successfully');
+
+    // Verify status uses new time
+    const statusRes = await app.inject({ method: 'GET', url: '/flash-sale/status' });
+    expect(statusRes.json().status).toBe('upcoming');
+
+    await app.close();
+  });
+
+  it('fails if start time is after end time', async () => {
+    const app = await buildApp();
+    const newStart = new Date(Date.now() + 1000 * 60 * 120).toISOString();
+    const newEnd = new Date(Date.now() + 1000 * 60 * 60).toISOString();
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/flash-sale/config',
+      payload: { startTime: newStart, endTime: newEnd },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('Start time must be before end time');
 
     await app.close();
   });

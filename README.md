@@ -23,36 +23,36 @@ A production-grade flash sale platform built to handle thousands of concurrent p
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                        CLIENT BROWSER                       │
-│                    React + Vite (port 5173)                  │
+│                    React + Vite (port 5173)                 │
 └───────────────────────────┬─────────────────────────────────┘
                             │ HTTP REST
                             ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                     BACKEND SERVER                           │
+│                     BACKEND SERVER                          │
 │              Fastify + TypeScript (port 3000)               │
 │                                                             │
-│  ┌─────────────┐    ┌──────────────────────────────────┐   │
-│  │  Route      │    │       Purchase Flow               │   │
-│  │  Handlers   │───▶│  1. Validate input (Zod)          │   │
-│  │             │    │  2. Check sale window             │   │
-│  │  /status    │    │  3. Atomic Redis Lua Script       │   │
-│  │  /purchase  │    │     ├─ Check duplicate user       │   │
-│  │  /purchase/ │    │     ├─ Check remaining stock      │   │
-│  │   :userId   │    │     └─ Decrement stock + add user │   │
-│  └─────────────┘    │  4. Fire-and-forget → PostgreSQL  │   │
-│                     └──────────────────────────────────┘   │
+│  ┌─────────────┐    ┌──────────────────────────────────┐    │
+│  │  Route      │    │       Purchase Flow              │    │
+│  │  Handlers   │    │  1. Validate input (Zod)         │    │
+│  │             │    │  2. Check sale window            │    │
+│  │  /status    │    │  3. Atomic Redis Lua Script      │    │
+│  │  /purchase  │    │     ├─ Check duplicate user      │    │
+│  │  /purchase/ │    │     ├─ Check remaining stock     │    │
+│  │   :userId   │    │     └─ Decrement stock + add user│    │
+│  └─────────────┘    │  4. Fire-and-forget → PostgreSQL │    │
+│                     └──────────────────────────────────┘    │
 └───────────┬─────────────────────────┬───────────────────────┘
             │                         │
             ▼                         ▼
 ┌───────────────────┐     ┌───────────────────────┐
-│      REDIS        │     │      POSTGRESQL        │
-│  (Cache & Atomic) │     │   (Source of Truth)    │
-│                   │     │                        │
-│  stock:<id>  →    │     │  products table        │
-│    integer count  │     │  purchases table       │
-│                   │     │  (unique constraint:   │
-│  buyers:<id> →    │     │   user_id + product_id)│
-│    SET of userIds │     │                        │
+│      REDIS        │     │      POSTGRESQL       │
+│  (Cache & Atomic) │     │   (Source of Truth)   │
+│                   │     │                       │
+│  stock:<id>  →    │     │  products table       │
+│    integer count  │     │  purchases table      │
+│                   │     │  (unique constraint:  │
+│  buyers:<id> →    │     │   user_id+product_id) │
+│    SET of userIds │     │                       │
 └───────────────────┘     └───────────────────────┘
 ```
 
@@ -85,18 +85,18 @@ POST /purchase
 
 ## 🛠 Tech Stack
 
-| Layer | Technology | Reason |
-|---|---|---|
-| **Backend** | Fastify + TypeScript | High-performance HTTP server, low overhead |
-| **Frontend** | React + Vite | Fast dev experience, component-based UI |
-| **Database** | PostgreSQL | Durable source of truth with ACID guarantees |
-| **Cache / Atomic Ops** | Redis | Sub-millisecond latency for hot-path operations |
-| **ORM** | Prisma | Type-safe DB access, easy migrations |
-| **Validation** | Zod | Runtime schema validation with TypeScript inference |
-| **Logging** | Pino | Structured, high-performance JSON logging |
-| **Testing** | Vitest | Fast unit/integration testing |
-| **Stress Testing** | k6 | Scriptable load testing tool |
-| **Containerization** | Docker + Docker Compose | Reproducible local environment |
+| Layer                  | Technology              | Reason                                              |
+| ---------------------- | ----------------------- | --------------------------------------------------- |
+| **Backend**            | Fastify + TypeScript    | High-performance HTTP server, low overhead          |
+| **Frontend**           | React + Vite            | Fast dev experience, component-based UI             |
+| **Database**           | PostgreSQL              | Durable source of truth with ACID guarantees        |
+| **Cache / Atomic Ops** | Redis                   | Sub-millisecond latency for hot-path operations     |
+| **ORM**                | Prisma                  | Type-safe DB access, easy migrations                |
+| **Validation**         | Zod                     | Runtime schema validation with TypeScript inference |
+| **Logging**            | Pino                    | Structured, high-performance JSON logging           |
+| **Testing**            | Vitest                  | Fast unit/integration testing                       |
+| **Stress Testing**     | k6                      | Scriptable load testing tool                        |
+| **Containerization**   | Docker + Docker Compose | Reproducible local environment                      |
 
 ---
 
@@ -105,6 +105,7 @@ POST /purchase
 ### 1. Redis Lua Script for Atomic Operations
 
 The core purchase logic runs inside a single **Redis Lua Script** that atomically:
+
 1. Checks if the user is already in the `buyers` SET
 2. Checks if remaining stock > 0
 3. Decrements stock and adds the user to the buyers SET
@@ -122,6 +123,7 @@ After a successful Redis operation, the purchase is written to PostgreSQL **asyn
 **Why?** This keeps API latency extremely low under high load. The Redis SET is the authority for "who bought what" during the sale.
 
 **Trade-off:** In theory, a DB write could fail silently. Mitigated by:
+
 - Error logging on failure
 - The DB has a `UNIQUE(user_id, product_id)` constraint as a safety net
 - Self-healing on restart syncs DB state back to Redis
@@ -131,6 +133,7 @@ After a successful Redis operation, the purchase is written to PostgreSQL **asyn
 ### 3. Self-Healing State on Startup
 
 When the server boots, it reads all existing purchases from PostgreSQL and re-populates:
+
 - `stock:<productId>` in Redis (calculated as `INITIAL_STOCK - purchase_count`)
 - `buyers:<productId>` SET in Redis (all existing buyer user IDs)
 
@@ -196,19 +199,21 @@ cd bkpi-flash-sale-project
 docker compose up --build
 ```
 
-| Service | URL |
-|---|---|
-| Frontend | http://localhost:5173 |
+| Service     | URL                   |
+| ----------- | --------------------- |
+| Frontend    | http://localhost:5173 |
 | Backend API | http://localhost:3000 |
-| PostgreSQL | localhost:5432 |
-| Redis | localhost:6379 |
+| PostgreSQL  | localhost:5432        |
+| Redis       | localhost:6379        |
 
 To stop all services:
+
 ```bash
 docker compose down
 ```
 
 To stop and remove all volumes (reset database):
+
 ```bash
 docker compose down -v
 ```
@@ -257,6 +262,7 @@ Base URL: `http://localhost:3000`
 Returns the current status of the flash sale.
 
 **Response `200`:**
+
 ```json
 {
   "status": "active",
@@ -276,6 +282,7 @@ Returns the current status of the flash sale.
 Attempts to purchase the flash sale item.
 
 **Request Body:**
+
 ```json
 {
   "userId": "user-abc-123",
@@ -284,6 +291,7 @@ Attempts to purchase the flash sale item.
 ```
 
 **Response `201` (Success):**
+
 ```json
 {
   "message": "Purchase successful! Your item is secured."
@@ -291,6 +299,7 @@ Attempts to purchase the flash sale item.
 ```
 
 **Response `400` (Already purchased):**
+
 ```json
 {
   "error": "You have already purchased this item"
@@ -298,6 +307,7 @@ Attempts to purchase the flash sale item.
 ```
 
 **Response `400` (Sold out):**
+
 ```json
 {
   "error": "Product is sold out"
@@ -305,6 +315,7 @@ Attempts to purchase the flash sale item.
 ```
 
 **Response `400` (Sale not active):**
+
 ```json
 {
   "error": "Flash sale is not active"
@@ -318,6 +329,7 @@ Attempts to purchase the flash sale item.
 Checks if a specific user successfully secured an item.
 
 **Response `200`:**
+
 ```json
 {
   "userId": "user-abc-123",
@@ -341,6 +353,7 @@ Tests use **Vitest** and Fastify's built-in injection utility to test routes wit
 ## 📈 Stress Testing
 
 Stress tests simulate thousands of concurrent users hitting the purchase endpoint simultaneously to verify:
+
 - No overselling (final purchase count ≤ initial stock)
 - Correct enforcement of one-purchase-per-user
 - System stability under high load
@@ -371,15 +384,16 @@ EOF
 
 ### Expected Results
 
-| Metric | Expected |
-|---|---|
-| Total successful purchases | ≤ 100 (initial stock) |
-| Duplicate purchases | 0 |
-| Overselling | 0 |
-| Error rate under load | < 1% (only expected 400s) |
-| p95 response time | < 50ms |
+| Metric                     | Expected                  |
+| -------------------------- | ------------------------- |
+| Total successful purchases | ≤ 100 (initial stock)     |
+| Duplicate purchases        | 0                         |
+| Overselling                | 0                         |
+| Error rate under load      | < 1% (only expected 400s) |
+| p95 response time          | < 50ms                    |
 
 After the stress test, verify the result:
+
 ```bash
 curl http://localhost:3000/flash-sale/status
 # "remainingStock" should be 0 if stock ran out
@@ -389,14 +403,14 @@ curl http://localhost:3000/flash-sale/status
 
 ## 🔮 Future Improvements
 
-| Improvement | Benefit |
-|---|---|
-| BullMQ job queue | Async email notifications, audit logs |
-| Redis Sentinel / Cluster | High availability for Redis |
-| Horizontal scaling (multiple backend replicas) | Higher throughput |
-| Rate limiting per IP | Prevent bot abuse |
-| WebSocket / SSE for stock updates | Real-time UI without polling |
-| Prometheus + Grafana metrics | Observability under load |
+| Improvement                                    | Benefit                               |
+| ---------------------------------------------- | ------------------------------------- |
+| BullMQ job queue                               | Async email notifications, audit logs |
+| Redis Sentinel / Cluster                       | High availability for Redis           |
+| Horizontal scaling (multiple backend replicas) | Higher throughput                     |
+| Rate limiting per IP                           | Prevent bot abuse                     |
+| WebSocket / SSE for stock updates              | Real-time UI without polling          |
+| Prometheus + Grafana metrics                   | Observability under load              |
 
 ---
 
