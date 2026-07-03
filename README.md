@@ -191,7 +191,7 @@ bkpi-flash-sale-project/
 ### Prerequisites
 
 - [Docker](https://www.docker.com/get-started) & Docker Compose
-- [Node.js](https://nodejs.org/) v18+ (for running tests outside Docker)
+- [Node.js](https://nodejs.org/) v24+ (for running tests outside Docker)
 
 ### Option A: Run with Docker Compose (Recommended)
 
