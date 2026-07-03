@@ -37,7 +37,9 @@ services:
       - "3000:3000"
     volumes:
       - ./backend:/app
-    command: sh -c "npm install && npx prisma generate && npx prisma db push --accept-data-loss && npm run dev"
+      # Anonymous volume agar node_modules dari image tidak tertimpa oleh host mount
+      - /app/node_modules
+    command: sh -c "npx prisma db push --accept-data-loss && npm run dev"
     environment:
       - DATABASE_URL=postgresql://postgres:password@postgres:5432/flash_sale?schema=public&connection_limit=20
       - REDIS_URL=redis://redis:6379
@@ -48,10 +50,10 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
-      interval: 10s
-      timeout: 10s
-      retries: 15
-      start_period: 30s
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
 
   frontend:
     build: ./frontend
@@ -60,7 +62,9 @@ services:
       - "5173:5173"
     volumes:
       - ./frontend:/app
-    command: sh -c "npm install && npm run dev"
+      # Anonymous volume agar node_modules dari image tidak tertimpa oleh host mount
+      - /app/node_modules
+    command: sh -c "npm run dev"
     depends_on:
       backend:
         condition: service_healthy
@@ -81,4 +85,4 @@ services:
 
 volumes:
   postgres_data:
-  redis_data:
+  redis_data:
