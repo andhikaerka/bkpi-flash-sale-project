@@ -10,6 +10,12 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d flash_sale"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
   redis:
     image: redis:7-alpine
@@ -18,6 +24,11 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   backend:
     build: ./backend
@@ -31,8 +42,16 @@ services:
       - DATABASE_URL=postgresql://postgres:password@postgres:5432/flash_sale?schema=public&connection_limit=20
       - REDIS_URL=redis://redis:6379
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 30s
 
   frontend:
     build: ./frontend
@@ -43,7 +62,8 @@ services:
       - ./frontend:/app
     command: sh -c "npm install && npm run dev"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
 
   k6:
     image: grafana/k6:latest
@@ -54,7 +74,8 @@ services:
       - API_URL=http://backend:3000/purchase
     command: run /scripts/k6-script.js
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     profiles:
       - loadtest
 

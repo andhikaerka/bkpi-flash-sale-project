@@ -17,6 +17,11 @@ export default async function flashSaleRoutes(
   const controller = new FlashSaleController(options.flashSaleService);
 
   // --- Route Definitions ---
+  // Health check endpoint — digunakan oleh Docker healthcheck
+  fastify.get('/health', async (_request, reply) => {
+    reply.send({ status: 'ok' });
+  });
+
   // Bind methods ke instance controller agar `this` context tetap benar
   fastify.get('/flash-sale/status', controller.getStatus.bind(controller));
   fastify.post('/purchase', controller.purchase.bind(controller));
